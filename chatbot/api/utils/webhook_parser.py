@@ -246,16 +246,26 @@ async def _extract_voice_from_message(
     logger.info(f"Saved voice note to {file_path}")
 
     if not config.USE_FFMPEG or ext in AVAILABLE_AUDIO_FORMATS:
-        return transcribe_audio(str(file_path))
+        try:
+            return await transcribe_audio(str(file_path))
+        finally:
+            file_path.unlink(missing_ok=True)
 
     mp3_path = file_path.with_suffix(".mp3")
     ok = await convert_ogg_to_mp3(input_path=file_path, output_path=mp3_path)
     if ok:
         logger.info(f"Converted {ext} to MP3 with ffmpeg")
-        return transcribe_audio(str(mp3_path))
+        try:
+            return await transcribe_audio(str(mp3_path))
+        finally:
+            file_path.unlink(missing_ok=True)
+            mp3_path.unlink(missing_ok=True)
 
     logger.warning("FFmpeg conversion failed, using original file for transcription")
-    return transcribe_audio(str(file_path))
+    try:
+        return await transcribe_audio(str(file_path))
+    finally:
+        file_path.unlink(missing_ok=True)
 
 
 def _extract_text_from_message(message: dict, user_number: str) -> str:

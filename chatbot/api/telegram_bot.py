@@ -39,7 +39,10 @@ from chatbot.api.utils.text import strip_markdown
 from chatbot.api.utils.webhook_parser import (
     create_or_retrieve_documents_dir,
     create_or_retrieve_images_dir,
+    create_or_retrieve_voice_dir,
 )
+from chatbot.audio.audio_converter import convert_ogg_to_mp3
+from chatbot.audio.stt import AVAILABLE_AUDIO_FORMATS, transcribe_audio
 from chatbot.core import human_control
 from chatbot.core.config import config
 from chatbot.core.logging_conf import init_logging
@@ -236,6 +239,149 @@ async def _handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
 
 
+async def _run_agent_and_reply(
+    chat_id: str,
+    chat_id_int: int,
+    incoming_msg: str,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Run the AI agent for a given message and send the response."""
+    if not update.message:
+        return
+    logger.info("=" * 80)
+    logger.info("telegram_id=%s: %s", chat_id, incoming_msg)
+
+    if human_control.is_telegram_controlled(chat_id):
+        logger.info(
+            "[human-control] Skipping AI for telegram_id=%s — conversation under human control",
+            chat_id,
+        )
+        return
+
+    typing_task = asyncio.create_task(_typing_loop(context.bot, chat_id_int))
+
+    try:
+        await services.ensure_system_message(
+            phone=chat_id,
+            message=CHANNEL_MARKERS[CHANNEL_TELEGRAM],
+        )
+        await message_handler.save_user_msg(chat_id, incoming_msg)
+
+        async def _send_photo_tg(image_bytes: bytes, caption: str) -> None:
+            if update.message is None:
+                return
+            await update.message.reply_photo(
+                photo=image_bytes, caption=caption, do_quote=True
+            )
+
+        deps = AgentDeps(
+            db_services=services,
+            whatsapp_client=_noop_whatsapp,
+            user_phone=_user_phones.get(chat_id, ""),
+            telegram_id=chat_id,
+            send_photo_callback=_send_photo_tg,
+        )
+
+        agent = get_viventi_agent()
+        history = await services.get_pydantic_ai_history(chat_id, hours=24)
+        try:
+            try:
+                result = await agent.run(
+                    incoming_msg, deps=deps, message_history=history
+                )
+            except ModelHTTPError as http_exc:
+                if http_exc.status_code == 503:
+                    logger.warning(
+                        "[fallback] 503 on primary model for telegram_id=%s — switching to %s",
+                        chat_id,
+                        FALLBACK_MODEL,
+                    )
+                    result = await agent.run(
+                        incoming_msg,
+                        deps=deps,
+                        message_history=history,
+                        model=FALLBACK_MODEL,
+                    )
+                else:
+                    raise
+            ai_response: str = strip_markdown(result.output)
+            tools_used = _extract_tools_used(result)
+        except UsageLimitExceeded as ule:
+            logger.warning(
+                "UsageLimitExceeded for telegram_id=%s: %s. Resetting history and retrying...",
+                chat_id,
+                ule,
+            )
+            await notify_error(
+                ule,
+                context=f"_run_agent_and_reply | user={chat_id} | msg={incoming_msg[:200]} | action=reset_retry",
+            )
+            await services.reset_chat(chat_id)
+            logger.info(
+                "[history] History reset for %s after UsageLimitExceeded", chat_id
+            )
+            new_history = await services.get_pydantic_ai_history(chat_id, hours=24)
+            try:
+                result = await agent.run(
+                    incoming_msg, deps=deps, message_history=new_history
+                )
+                ai_response = strip_markdown(result.output)
+                tools_used = _extract_tools_used(result)
+            except Exception as retry_exc:
+                logger.error(
+                    "Retry after reset failed for %s: %s",
+                    chat_id,
+                    retry_exc,
+                    exc_info=True,
+                )
+                await notify_error(
+                    retry_exc,
+                    context=f"_run_agent_and_reply | user={chat_id} | msg={incoming_msg[:200]} | action=retry_failed",
+                )
+                try:
+                    explanation = await run_error_agent(str(retry_exc))
+                    ai_response = explanation.user_message
+                except Exception as explainer_exc:
+                    logger.error("Error agent also failed: %s", explainer_exc)
+                    ai_response = (
+                        "An error occurred while processing your message. "
+                        "Please try again or type /restart."
+                    )
+                tools_used = []
+        except Exception as agent_exc:
+            logger.error(
+                "Agent error for telegram_id=%s: %s",
+                chat_id,
+                agent_exc,
+                exc_info=True,
+            )
+            await notify_error(
+                agent_exc,
+                context=f"_run_agent_and_reply | user={chat_id} | msg={incoming_msg[:200]}",
+            )
+            try:
+                explanation = await run_error_agent(str(agent_exc))
+                ai_response = explanation.user_message
+            except Exception as explainer_exc:
+                logger.error("Error agent also failed: %s", explainer_exc)
+                ai_response = (
+                    "An error occurred while processing your message. "
+                    "Please try again or type /restart."
+                )
+            tools_used = []
+
+        logger.info("Agent response for telegram_id=%s: %s", chat_id, ai_response)
+        logger.debug("Tools used: %s", tools_used)
+
+        await message_handler.save_assistant_msg(chat_id, ai_response, tools_used)
+        await update.message.reply_text(ai_response, do_quote=True)
+        asyncio.create_task(_maybe_compress_history(chat_id, len(history)))
+
+    finally:
+        typing_task.cancel()
+
+
 async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Process an incoming text message through the AI agent."""
     if not update.message or not update.message.text or not update.effective_chat:
@@ -266,137 +412,7 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             return
 
-        logger.info("=" * 80)
-        logger.info("telegram_id=%s: %s", chat_id, incoming_msg)
-
-        if human_control.is_telegram_controlled(chat_id):
-            logger.info(
-                "[human-control] Skipping AI for telegram_id=%s — conversation under human control",
-                chat_id,
-            )
-            return
-
-        typing_task = asyncio.create_task(_typing_loop(context.bot, chat_id_int))
-
-        try:
-            await services.ensure_system_message(
-                phone=chat_id,
-                message=CHANNEL_MARKERS[CHANNEL_TELEGRAM],
-            )
-            await message_handler.save_user_msg(chat_id, incoming_msg)
-
-            async def _send_photo_tg(image_bytes: bytes, caption: str) -> None:
-                if update.message is None:
-                    return
-                await update.message.reply_photo(
-                    photo=image_bytes, caption=caption, do_quote=True
-                )
-
-            deps = AgentDeps(
-                db_services=services,
-                whatsapp_client=_noop_whatsapp,
-                user_phone=_user_phones.get(chat_id, ""),
-                telegram_id=chat_id,
-                send_photo_callback=_send_photo_tg,
-            )
-
-            agent = get_viventi_agent()
-            history = await services.get_pydantic_ai_history(chat_id, hours=24)
-            try:
-                try:
-                    result = await agent.run(
-                        incoming_msg, deps=deps, message_history=history
-                    )
-                except ModelHTTPError as http_exc:
-                    if http_exc.status_code == 503:
-                        logger.warning(
-                            "[fallback] 503 on primary model for telegram_id=%s — switching to %s",
-                            chat_id,
-                            FALLBACK_MODEL,
-                        )
-                        result = await agent.run(
-                            incoming_msg,
-                            deps=deps,
-                            message_history=history,
-                            model=FALLBACK_MODEL,
-                        )
-                    else:
-                        raise
-                ai_response: str = strip_markdown(result.output)
-                tools_used = _extract_tools_used(result)
-            except UsageLimitExceeded as ule:
-                logger.warning(
-                    "UsageLimitExceeded for telegram_id=%s: %s. Resetting history and retrying...",
-                    chat_id,
-                    ule,
-                )
-                await notify_error(
-                    ule,
-                    context=f"_handle_message | user={chat_id} | msg={incoming_msg[:200]} | action=reset_retry",
-                )
-                await services.reset_chat(chat_id)
-                logger.info(
-                    "[history] History reset for %s after UsageLimitExceeded", chat_id
-                )
-                new_history = await services.get_pydantic_ai_history(chat_id, hours=24)
-                try:
-                    result = await agent.run(
-                        incoming_msg, deps=deps, message_history=new_history
-                    )
-                    ai_response = strip_markdown(result.output)
-                    tools_used = _extract_tools_used(result)
-                except Exception as retry_exc:
-                    logger.error(
-                        "Retry after reset failed for %s: %s",
-                        chat_id,
-                        retry_exc,
-                        exc_info=True,
-                    )
-                    await notify_error(
-                        retry_exc,
-                        context=f"_handle_message | user={chat_id} | msg={incoming_msg[:200]} | action=retry_failed",
-                    )
-                    try:
-                        explanation = await run_error_agent(str(retry_exc))
-                        ai_response = explanation.user_message
-                    except Exception as explainer_exc:
-                        logger.error("Error agent also failed: %s", explainer_exc)
-                        ai_response = (
-                            "An error occurred while processing your message. "
-                            "Please try again or type /restart."
-                        )
-                    tools_used = []
-            except Exception as agent_exc:
-                logger.error(
-                    "Agent error for telegram_id=%s: %s",
-                    chat_id,
-                    agent_exc,
-                    exc_info=True,
-                )
-                await notify_error(
-                    agent_exc,
-                    context=f"_handle_message | user={chat_id} | msg={incoming_msg[:200]}",
-                )
-                try:
-                    explanation = await run_error_agent(str(agent_exc))
-                    ai_response = explanation.user_message
-                except Exception as explainer_exc:
-                    logger.error("Error agent also failed: %s", explainer_exc)
-                    ai_response = (
-                        "An error occurred while processing your message. "
-                        "Please try again or type /restart."
-                    )
-                tools_used = []
-
-            logger.info("Agent response for telegram_id=%s: %s", chat_id, ai_response)
-            logger.debug("Tools used: %s", tools_used)
-
-            await message_handler.save_assistant_msg(chat_id, ai_response, tools_used)
-            await update.message.reply_text(ai_response, do_quote=True)
-            asyncio.create_task(_maybe_compress_history(chat_id, len(history)))
-
-        finally:
-            typing_task.cancel()
+        await _run_agent_and_reply(chat_id, chat_id_int, incoming_msg, update, context)
 
     except Exception as exc:
         logger.exception(
@@ -409,6 +425,91 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if update.message:
             await update.message.reply_text(
                 "An error occurred while processing your message. "
+                "Please try again or type /restart.",
+                do_quote=True,
+            )
+
+
+async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Transcribe a Telegram voice note and process it as a text message."""
+    if not update.message or not update.message.voice or not update.effective_chat:
+        return
+
+    chat_id_int: int = update.effective_chat.id
+    chat_id: str = str(chat_id_int)
+
+    try:
+        if chat_id in _pending_phone:
+            await update.message.reply_text(
+                "I need your phone number before I can process voice notes. "
+                "Please send it as text (including country code, for example: +59899000000).",
+                do_quote=True,
+            )
+            return
+
+        if chat_id not in _user_phones:
+            _pending_phone.add(chat_id)
+            await update.message.reply_text(
+                "Before we continue, I need your phone number "
+                "(including country code, for example: +59899000000):",
+                do_quote=True,
+            )
+            return
+
+        tg_file = await update.message.voice.get_file()
+        voice_dir = create_or_retrieve_voice_dir()
+        file_path = voice_dir / f"{chat_id}.oga"
+        await tg_file.download_to_drive(str(file_path))
+        logger.info("[voice] Saved Telegram voice note to %s", file_path)
+
+        try:
+            if config.USE_FFMPEG and ".oga" not in AVAILABLE_AUDIO_FORMATS:
+                mp3_path = file_path.with_suffix(".mp3")
+                ok = await convert_ogg_to_mp3(
+                    input_path=file_path, output_path=mp3_path
+                )
+                if ok:
+                    try:
+                        transcription = await transcribe_audio(str(mp3_path))
+                    finally:
+                        file_path.unlink(missing_ok=True)
+                        mp3_path.unlink(missing_ok=True)
+                else:
+                    try:
+                        transcription = await transcribe_audio(str(file_path))
+                    finally:
+                        file_path.unlink(missing_ok=True)
+            else:
+                try:
+                    transcription = await transcribe_audio(str(file_path))
+                finally:
+                    file_path.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.exception(
+                "[voice] Transcription failed for telegram_id=%s: %s", chat_id, exc
+            )
+            await update.message.reply_text(
+                "I couldn't process your voice note. Please try again or type your message.",
+                do_quote=True,
+            )
+            return
+
+        logger.info(
+            "[voice] Transcription for telegram_id=%s: %s", chat_id, transcription
+        )
+        await _run_agent_and_reply(chat_id, chat_id_int, transcription, update, context)
+
+    except Exception as exc:
+        logger.exception(
+            "Error processing voice note for telegram_id=%s: %s", chat_id, exc
+        )
+        await notify_error(
+            exc,
+            context=f"telegram_bot._handle_voice | chat_id={chat_id}",
+        )
+        if update.message:
+            await update.message.reply_text(
+                "An error occurred while processing your voice note. "
                 "Please try again or type /restart.",
                 do_quote=True,
             )
@@ -460,6 +561,7 @@ def build_application() -> Application:
         CommandHandler("test_dev_notifications", cmd_test_dev_notifications)
     )
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
+    app.add_handler(MessageHandler(filters.VOICE, _handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, _handle_image))
     app.add_handler(MessageHandler(filters.Document.PDF, _handle_document))
 
