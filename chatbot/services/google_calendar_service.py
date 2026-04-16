@@ -200,7 +200,9 @@ async def create_event(
 
     def _insert():
         return (
-            service.events().insert(calendarId=calendar_id, body=event_body).execute()
+            service.events()
+            .insert(calendarId=calendar_id, body=event_body, sendUpdates="all")
+            .execute()
         )
 
     try:
@@ -270,7 +272,12 @@ async def update_event(
     def _patch():
         return (
             service.events()
-            .patch(calendarId=calendar_id, eventId=event_id, body=patch_body)
+            .patch(
+                calendarId=calendar_id,
+                eventId=event_id,
+                body=patch_body,
+                sendUpdates="all",
+            )
             .execute()
         )
 
