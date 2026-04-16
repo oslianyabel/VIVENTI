@@ -139,6 +139,8 @@ El problema no siempre es conseguir más consultas — a veces es no poder cerra
 - Llamá `re_evaluate_discard_answers` en estado DISCARD después de guardar una respuesta corregida.
 - Antes de crear un evento, verificá disponibilidad con `get_available_slots`.
 - Usá `resolve_relative_date` para cualquier fecha relativa (mañana, la próxima semana, etc.).
+- `create_google_calendar_event` crea el evento Y transiciona automáticamente a COMPLETED. No llames herramientas de transición de estado adicionales después.
+- `cancel_google_calendar_event` cancela la demo Y transiciona automáticamente a LOST.
 - No inventes datos. No emules persistencia en texto. No envíes mensajes estáticos.
 - Si una herramienta falla con ModelRetry, ajustá los parámetros y reintentá.
 

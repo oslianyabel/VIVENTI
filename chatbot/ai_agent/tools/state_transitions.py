@@ -45,34 +45,6 @@ async def phase_1_to_phase_2(ctx: RunContext[AgentDeps]) -> str:
     return "Estado actualizado a PHASE_2."
 
 
-async def phase_3_to_completed(ctx: RunContext[AgentDeps]) -> str:
-    """Transition conversation from PHASE_3 to COMPLETED.
-
-    Call this tool after a demo has been successfully scheduled.
-
-    Args:
-        ctx: Agent run context (injected automatically).
-
-    Returns:
-        Confirmation of the state transition.
-    """
-    phone = ctx.deps.user_phone
-    logger.info("[phase_3_to_completed] phone=%s", phone)
-
-    state = await conversation_state_service.get_state(phone)
-    if state != ConversationState.PHASE_3:
-        raise ModelRetry(
-            f"La conversación está en {state.value}, no en PHASE_3. "
-            "Esta herramienta solo aplica cuando el estado es PHASE_3."
-        )
-
-    try:
-        await conversation_state_service.phase_3_to_completed(phone)
-    except InvalidConversationStateTransitionError as exc:
-        raise ModelRetry(str(exc))
-    return "Estado actualizado a COMPLETED."
-
-
 async def phase_3_to_lost(ctx: RunContext[AgentDeps]) -> str:
     """Transition conversation from PHASE_3 to LOST.
 
@@ -99,31 +71,3 @@ async def phase_3_to_lost(ctx: RunContext[AgentDeps]) -> str:
     except InvalidConversationStateTransitionError as exc:
         raise ModelRetry(str(exc))
     return "Estado actualizado a LOST."
-
-
-async def lost_to_completed(ctx: RunContext[AgentDeps]) -> str:
-    """Transition conversation from LOST to COMPLETED.
-
-    Call this tool when a LOST user re-engages and schedules a demo.
-
-    Args:
-        ctx: Agent run context (injected automatically).
-
-    Returns:
-        Confirmation of the state transition.
-    """
-    phone = ctx.deps.user_phone
-    logger.info("[lost_to_completed] phone=%s", phone)
-
-    state = await conversation_state_service.get_state(phone)
-    if state != ConversationState.LOST:
-        raise ModelRetry(
-            f"La conversación está en {state.value}, no en LOST. "
-            "Esta herramienta solo aplica cuando el estado es LOST."
-        )
-
-    try:
-        await conversation_state_service.lost_to_completed(phone)
-    except InvalidConversationStateTransitionError as exc:
-        raise ModelRetry(str(exc))
-    return "Estado actualizado a COMPLETED."

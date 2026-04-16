@@ -126,15 +126,23 @@ async def create_google_calendar_event(
         event_id = await _create_event(demo, attendee_email)
     except GoogleCalendarError as exc:
         logger.error("[create_google_calendar_event] %s", exc)
-        return f"Error al crear el evento en Google Calendar: {exc}"
+        raise ModelRetry(
+            f"Error al crear el evento en Google Calendar: {exc}. "
+            "Reintentá la creación del evento."
+        )
 
     demo.google_calendar_event_id = event_id
     await services.upsert_demo(demo)
-    await conversation_state_service.phase_3_to_completed(phone)
+
+    if state == ConversationState.LOST:
+        await conversation_state_service.lost_to_completed(phone)
+    else:
+        await conversation_state_service.phase_3_to_completed(phone)
 
     return (
         f"Demo agendada para el {dt.strftime('%d/%m/%Y a las %H:%M')} hs. "
-        f"Duración: {DEMO_DURATION_MINUTES} minutos."
+        f"Duración: {DEMO_DURATION_MINUTES} minutos. "
+        "Estado actualizado a COMPLETED automáticamente. No llames ninguna otra herramienta de transición."
     )
 
 

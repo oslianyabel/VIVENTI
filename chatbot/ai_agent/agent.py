@@ -28,9 +28,7 @@ from chatbot.ai_agent.tools.qualification import (
     save_phase_2_answers,
 )
 from chatbot.ai_agent.tools.state_transitions import (
-    lost_to_completed,
     phase_1_to_phase_2,
-    phase_3_to_completed,
     phase_3_to_lost,
 )
 from chatbot.ai_agent.tools.user_data import update_user_data
@@ -61,9 +59,7 @@ AGENT_TOOLS = [
     resolve_relative_date,
     # State transitions
     phase_1_to_phase_2,
-    phase_3_to_completed,
     phase_3_to_lost,
-    lost_to_completed,
     # Read-only
     get_available_slots,
     get_google_sheets_data,
