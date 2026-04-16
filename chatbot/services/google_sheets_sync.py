@@ -82,10 +82,10 @@ async def build_sheets_row(phone: str) -> GoogleSheetsRowData:
     if demo and demo.scheduled_at:
         dt = demo.scheduled_at
         if isinstance(dt, datetime):
-            demo_date = dt.isoformat()
+            demo_date = dt.strftime("%Y-%m-%d")
 
     return GoogleSheetsRowData(
-        fecha=datetime.now(UTC).isoformat(),
+        fecha=datetime.now(UTC).strftime("%Y-%m-%d"),
         telefono=phone,
         nombre_contacto=getattr(user, "name", "") or "",
         nombre_establecimiento=getattr(user, "establishment_name", "") or "",
