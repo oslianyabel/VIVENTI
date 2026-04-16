@@ -12,6 +12,7 @@ from chatbot.core.config import config
 from chatbot.core.logging_conf import init_logging
 from chatbot.core.sentry import init_sentry
 from chatbot.db.services import services
+from chatbot.services import conversation_state_service
 
 init_logging()
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
     await services.database.connect()
     init_sentry()
     create_dirs()
+    await conversation_state_service.preload_active_users()
 
     yield
 
@@ -72,3 +74,8 @@ async def root():
         "version": "1.0.0",
         "docs": "/docs",
     }
+
+
+@app.get("/sentry-debug")
+async def trigger_error():
+    division_by_zero = 1 / 0

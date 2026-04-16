@@ -6,6 +6,7 @@ import sqlalchemy
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 
 from chatbot.core.config import config
+from chatbot.domain.conversation_states import INITIAL_CONVERSATION_STATE
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,35 @@ users_table = sqlalchemy.Table(
     metadata,
     sqlalchemy.Column("phone", String, primary_key=True),
     sqlalchemy.Column("name", String, nullable=True),
+    sqlalchemy.Column("email", String, nullable=True),
+    sqlalchemy.Column("experience_name", String, nullable=True),
+    sqlalchemy.Column("phase_2_answer_1", Text, nullable=True),
+    sqlalchemy.Column("phase_2_answer_2", Text, nullable=True),
+    sqlalchemy.Column("phase_2_answer_3", Text, nullable=True),
+    sqlalchemy.Column("phase_2_answer_4", Text, nullable=True),
+    sqlalchemy.Column("phase_2_answer_5", Text, nullable=True),
+    sqlalchemy.Column("phase_2_answer_6", Text, nullable=True),
+    sqlalchemy.Column("establishment_name", String, nullable=True),
+    sqlalchemy.Column("experience_type", String, nullable=True),
+    sqlalchemy.Column("country", String, nullable=True),
+    sqlalchemy.Column("reservation_method", String, nullable=True),
+    sqlalchemy.Column("monthly_reservations", Integer, nullable=True),
+    sqlalchemy.Column("payment_method", String, nullable=True),
+    sqlalchemy.Column("has_instagram", String, nullable=True),
+    sqlalchemy.Column("uses_instagram_for_sales", String, nullable=True),
+    sqlalchemy.Column("main_pain_point", Text, nullable=True),
+    sqlalchemy.Column("is_qualified", Boolean, nullable=True),
+    sqlalchemy.Column("disqualification_reason", String, nullable=True),
+    sqlalchemy.Column(
+        "conversation_state",
+        String,
+        nullable=False,
+        server_default=INITIAL_CONVERSATION_STATE.value,
+    ),
+    sqlalchemy.Column("language", String, nullable=True),
+    sqlalchemy.Column("notes", Text, nullable=True),
+    sqlalchemy.Column("follow_up_count", Integer, nullable=False, server_default="0"),
+    sqlalchemy.Column("last_follow_up_at", DateTime, nullable=True),
     sqlalchemy.Column("address", String, nullable=True),
     sqlalchemy.Column("resume", Text, nullable=True),
     sqlalchemy.Column("permissions", String, default="user"),
@@ -36,6 +66,26 @@ message_table = sqlalchemy.Table(
         "active", Boolean, nullable=False, server_default=sqlalchemy.true()
     ),
     sqlalchemy.Column("created_at", DateTime, default=func.now()),
+)
+
+demos_table = sqlalchemy.Table(
+    "demos",
+    metadata,
+    sqlalchemy.Column("id", Integer, primary_key=True, autoincrement=True),
+    sqlalchemy.Column(
+        "user_phone",
+        ForeignKey("users.phone", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    ),
+    sqlalchemy.Column("title", String, nullable=False),
+    sqlalchemy.Column("duration_minutes", Integer, nullable=False),
+    sqlalchemy.Column("description", Text, nullable=False),
+    sqlalchemy.Column("scheduled_at", DateTime, nullable=False),
+    sqlalchemy.Column("google_calendar_event_id", String, nullable=True),
+    sqlalchemy.Column("upcoming_reminder_sent_at", DateTime, nullable=True),
+    sqlalchemy.Column("created_at", DateTime, default=func.now()),
+    sqlalchemy.Column("updated_at", DateTime, default=func.now()),
 )
 
 

@@ -1,7 +1,8 @@
 import json
 import logging
 import sys
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 
 import asyncpg
@@ -17,10 +18,16 @@ from pydantic_ai.messages import (
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from chatbot.db.schema import (
+    demos_table,
     init_db,
     message_table,
     users_table,
 )
+from chatbot.domain.conversation_states import (
+    INITIAL_CONVERSATION_STATE,
+    ConversationState,
+)
+from chatbot.domain.demo import DemoRecord
 
 logger = logging.getLogger(__name__)
 
@@ -69,16 +76,23 @@ class Services:
 
     def _normalize_user_data(self, **kwargs) -> dict:
         """Normaliza y filtra datos de usuario, eliminando None y espacios."""
-        normalized = {}
+        normalized: dict[str, object] = {}
         for key, value in kwargs.items():
             if value is not None:
+                if isinstance(value, StrEnum):
+                    normalized[key] = value.value
+                    continue
                 normalized[key] = value.strip() if isinstance(value, str) else value
         return normalized
 
     async def create_user(
         self, phone: str, permissions: str = "user", **kwargs
     ) -> bool:
-        data = {"phone": phone, "permissions": permissions}
+        data = {
+            "phone": phone,
+            "permissions": permissions,
+            "conversation_state": INITIAL_CONVERSATION_STATE.value,
+        }
         data.update(self._normalize_user_data(**kwargs))
         ok = await self._create_user_with_data(phone, data)
         return ok
@@ -155,6 +169,127 @@ class Services:
             logger.debug(query)
 
         await self.database.execute(query)
+        if role == "user":
+            await self.update_last_interaction(phone)
+
+    async def update_last_interaction(
+        self,
+        phone: str,
+        interacted_at: datetime | None = None,
+    ) -> bool:
+        return await self._update_user_data(
+            phone,
+            {
+                "last_interaction": interacted_at
+                or datetime.now(UTC).replace(tzinfo=None)
+            },
+        )
+
+    async def get_users_with_active_conversations(self) -> list:
+        subq = (
+            sqlalchemy.select(message_table.c.user_phone)
+            .where(message_table.c.active.is_(True))
+            .distinct()
+            .subquery()
+        )
+        query = users_table.select().where(
+            users_table.c.phone.in_(sqlalchemy.select(subq.c.user_phone))
+        )
+        if self.debug:
+            logger.debug(query)
+        return await self.database.fetch_all(query)
+
+    async def get_user_conversation_state(self, phone: str) -> ConversationState:
+        user = await self.get_user(phone)
+        if user is None:
+            return INITIAL_CONVERSATION_STATE
+
+        state_value = getattr(user, "conversation_state", None)
+        if not state_value:
+            return INITIAL_CONVERSATION_STATE
+        return ConversationState(state_value)
+
+    async def update_conversation_state(
+        self,
+        phone: str,
+        state: ConversationState,
+    ) -> bool:
+        return await self.update_user(phone, conversation_state=state)
+
+    async def update_follow_up_count(self, phone: str, follow_up_count: int) -> bool:
+        return await self.update_user(phone, follow_up_count=follow_up_count)
+
+    async def update_phase_2_answers(
+        self,
+        phone: str,
+        answers: dict[str, str | None],
+    ) -> bool:
+        return await self.update_user(phone, **answers)
+
+    async def get_demo_by_phone(self, phone: str):
+        query = demos_table.select().where(demos_table.c.user_phone == phone)
+        if self.debug:
+            logger.debug(query)
+        return await self.database.fetch_one(query)
+
+    async def upsert_demo(
+        self,
+        demo: DemoRecord,
+    ) -> bool:
+        if not await self.get_user(demo.user_phone):
+            await self.create_user(demo.user_phone)
+
+        existing_demo = await self.get_demo_by_phone(demo.user_phone)
+        values = {
+            "user_phone": demo.user_phone,
+            "title": demo.title,
+            "duration_minutes": demo.duration_minutes,
+            "description": demo.description,
+            "scheduled_at": demo.scheduled_at,
+            "google_calendar_event_id": demo.google_calendar_event_id,
+            "upcoming_reminder_sent_at": demo.upcoming_reminder_sent_at,
+        }
+
+        if existing_demo is None:
+            query = demos_table.insert().values(values)
+        else:
+            query = (
+                demos_table.update()
+                .where(demos_table.c.user_phone == demo.user_phone)
+                .values(**values, updated_at=sqlalchemy.func.now())
+            )
+
+        if self.debug:
+            logger.debug(query)
+
+        await self.database.execute(query)
+        return True
+
+    async def mark_demo_reminder_sent(
+        self,
+        phone: str,
+        sent_at: datetime | None = None,
+    ) -> bool:
+        query = (
+            demos_table.update()
+            .where(demos_table.c.user_phone == phone)
+            .values(
+                upcoming_reminder_sent_at=sent_at
+                or datetime.now(UTC).replace(tzinfo=None),
+                updated_at=sqlalchemy.func.now(),
+            )
+        )
+        if self.debug:
+            logger.debug(query)
+        await self.database.execute(query)
+        return True
+
+    async def delete_demo_by_phone(self, phone: str) -> bool:
+        query = demos_table.delete().where(demos_table.c.user_phone == phone)
+        if self.debug:
+            logger.debug(query)
+        await self.database.execute(query)
+        return True
 
     async def has_message(
         self,

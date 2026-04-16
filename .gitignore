@@ -31,3 +31,6 @@ static/
 
 # docker
 my_docker-compose.yml
+
+# Google credentials
+*.json

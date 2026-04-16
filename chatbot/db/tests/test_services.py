@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
 import pytest
 from pydantic_ai.messages import (
@@ -30,6 +31,8 @@ from pydantic_ai.messages import (
 
 from chatbot.db.schema import init_db
 from chatbot.db.services import Services
+from chatbot.domain.conversation_states import ConversationState
+from chatbot.domain.demo import DemoRecord
 
 TEST_PHONE = "123456789"
 
@@ -43,9 +46,15 @@ TEST_PHONE = "123456789"
 async def db():
     """Conexión real a la base de datos por cada test."""
     database = init_db()
-    await database.connect()
+    try:
+        await database.connect()
+    except OSError as exc:
+        pytest.skip(f"PostgreSQL is not available for integration tests: {exc}")
+
     yield database
-    await database.disconnect()
+
+    if database.is_connected:
+        await database.disconnect()
 
 
 @pytest.fixture()
@@ -57,18 +66,28 @@ def services(db) -> Services:
 @pytest.fixture(autouse=True)
 async def clean_test_data(services: Services, db) -> AsyncGenerator[None, None]:
     """Elimina datos del teléfono de prueba antes y después de cada test."""
-    await services.reset_chat(TEST_PHONE)
     user = await services.get_user(TEST_PHONE)
     if user:
-        from chatbot.db.schema import users_table
+        from chatbot.db.schema import demos_table, message_table, users_table
 
+        await db.execute(
+            demos_table.delete().where(demos_table.c.user_phone == TEST_PHONE)
+        )
+        await db.execute(
+            message_table.delete().where(message_table.c.user_phone == TEST_PHONE)
+        )
         await db.execute(users_table.delete().where(users_table.c.phone == TEST_PHONE))
     yield
-    await services.reset_chat(TEST_PHONE)
     user = await services.get_user(TEST_PHONE)
     if user:
-        from chatbot.db.schema import users_table
+        from chatbot.db.schema import demos_table, message_table, users_table
 
+        await db.execute(
+            demos_table.delete().where(demos_table.c.user_phone == TEST_PHONE)
+        )
+        await db.execute(
+            message_table.delete().where(message_table.c.user_phone == TEST_PHONE)
+        )
         await db.execute(users_table.delete().where(users_table.c.phone == TEST_PHONE))
 
 
@@ -88,6 +107,7 @@ async def test_get_user_found(services: Services) -> None:
     print(f"\n  get_user -> phone={result.phone}, name={result.name}")  # type: ignore[union-attr]
     assert result is not None
     assert result.phone == TEST_PHONE  # type: ignore[union-attr]
+    assert result.conversation_state == ConversationState.PHASE_1.value  # type: ignore[union-attr]
 
 
 # uv run pytest -s chatbot/db/tests/test_services.py::test_get_user_not_found
@@ -187,7 +207,7 @@ async def test_get_pydantic_ai_history_strips_prefix(services: Services) -> None
     history = await services.get_pydantic_ai_history(TEST_PHONE, hours=24)
 
     print(f"\n  get_pydantic_ai_history (strip prefix) -> {len(history)} entradas")
-    assert history[0].parts[0].content == "¿Cuánto cuesta?" # type: ignore
+    assert history[0].parts[0].content == "¿Cuánto cuesta?"  # type: ignore
     assert history[1].parts[0].content == "Depende del tour."  # type: ignore[attr-defined]
 
 
@@ -235,6 +255,121 @@ async def test_get_messages_empty(services: Services) -> None:
 
     print(f"\n  get_messages (empty) -> {result}")
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# write methods for expanded schema
+# ---------------------------------------------------------------------------
+
+
+# uv run pytest -s chatbot/db/tests/test_services.py::test_update_phase_2_answers_persists_generic_fields
+@pytest.mark.anyio
+async def test_update_phase_2_answers_persists_generic_fields(
+    services: Services,
+) -> None:
+    """Debe persistir las respuestas numeradas de PHASE_2 en users."""
+    await services.create_user(TEST_PHONE)
+
+    result = await services.update_phase_2_answers(
+        TEST_PHONE,
+        {
+            "phase_2_answer_1": "bodega",
+            "phase_2_answer_2": "uruguay",
+            "phase_2_answer_3": "whatsapp",
+            "phase_2_answer_4": "12",
+            "phase_2_answer_5": "transferencia",
+            "phase_2_answer_6": "si, vendo por instagram",
+        },
+    )
+    user = await services.get_user(TEST_PHONE)
+
+    print(
+        f"\n  phase_2 answers persisted -> {user.phase_2_answer_1}, {user.phase_2_answer_6}"
+    )  # type: ignore[union-attr]
+    assert result is True
+    assert user is not None
+    assert user.phase_2_answer_1 == "bodega"  # type: ignore[union-attr]
+    assert user.phase_2_answer_6 == "si, vendo por instagram"  # type: ignore[union-attr]
+
+
+# uv run pytest -s chatbot/db/tests/test_services.py::test_update_conversation_state_updates_user
+@pytest.mark.anyio
+async def test_update_conversation_state_updates_user(services: Services) -> None:
+    """Debe actualizar el estado conversacional persistido del usuario."""
+    await services.create_user(TEST_PHONE)
+
+    result = await services.update_conversation_state(
+        TEST_PHONE,
+        ConversationState.PHASE_2,
+    )
+    state = await services.get_user_conversation_state(TEST_PHONE)
+
+    print(f"\n  conversation_state -> {state}")
+    assert result is True
+    assert state == ConversationState.PHASE_2
+
+
+# uv run pytest -s chatbot/db/tests/test_services.py::test_upsert_demo_creates_and_updates_single_record
+@pytest.mark.anyio
+async def test_upsert_demo_creates_and_updates_single_record(
+    services: Services,
+) -> None:
+    """Debe crear y luego sobreescribir la demo del usuario manteniendo un solo registro."""
+    await services.create_user(TEST_PHONE)
+    first_demo = DemoRecord(
+        title="Demo Viventi - Ana / Bodega Sur",
+        duration_minutes=30,
+        description="Primera demo",
+        user_phone=TEST_PHONE,
+        scheduled_at=datetime(2026, 4, 14, 15, 0, 0),
+        google_calendar_event_id="evt-1",
+    )
+    second_demo = DemoRecord(
+        title="Demo Viventi - Ana / Bodega Sur",
+        duration_minutes=30,
+        description="Demo reagendada",
+        user_phone=TEST_PHONE,
+        scheduled_at=datetime(2026, 4, 15, 16, 0, 0),
+        google_calendar_event_id="evt-2",
+    )
+
+    created = await services.upsert_demo(first_demo)
+    updated = await services.upsert_demo(second_demo)
+    demo = await services.get_demo_by_phone(TEST_PHONE)
+
+    print(
+        f"\n  demo -> scheduled_at={demo.scheduled_at}, event_id={demo.google_calendar_event_id}"
+    )  # type: ignore[union-attr]
+    assert created is True
+    assert updated is True
+    assert demo is not None
+    assert demo.description == "Demo reagendada"  # type: ignore[union-attr]
+    assert demo.google_calendar_event_id == "evt-2"  # type: ignore[union-attr]
+
+
+# uv run pytest -s chatbot/db/tests/test_services.py::test_mark_demo_reminder_sent_updates_timestamp
+@pytest.mark.anyio
+async def test_mark_demo_reminder_sent_updates_timestamp(services: Services) -> None:
+    """Debe persistir la marca temporal del recordatorio de demo."""
+    await services.create_user(TEST_PHONE)
+    await services.upsert_demo(
+        DemoRecord(
+            title="Demo Viventi - Ana / Bodega Sur",
+            duration_minutes=30,
+            description="Demo programada",
+            user_phone=TEST_PHONE,
+            scheduled_at=datetime(2026, 4, 14, 15, 0, 0),
+        )
+    )
+    sent_at = datetime.now(UTC).replace(tzinfo=None)
+
+    result = await services.mark_demo_reminder_sent(TEST_PHONE, sent_at=sent_at)
+    demo = await services.get_demo_by_phone(TEST_PHONE)
+
+    print(f"\n  demo reminder sent at -> {demo.upcoming_reminder_sent_at}")  # type: ignore[union-attr]
+    assert result is True
+    assert demo is not None
+    assert demo.upcoming_reminder_sent_at == sent_at  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------

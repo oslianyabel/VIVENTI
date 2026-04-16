@@ -31,6 +31,10 @@ class MyConfig(BaseSettings):  # type: ignore
     TELEGRAM_DEV_CHAT_ID: str
     TELEGRAM_BOT_TOKEN_NOTIFIER: str
 
+    GOOGLE_CALENDAR_ID: str
+    GOOGLE_SHEETS_CREDENTIALS_FILE: str
+    GOOGLE_SHEETS_SPREADSHEET_ID: str
+
     # Server
     SERVER_HOST: str
 
@@ -45,4 +49,4 @@ else:
 
 
 if __name__ == "__main__":
-    print(config.GOOGLE_API_KEY)
+    print(config.GOOGLE_CALENDAR_ID)
