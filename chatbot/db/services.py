@@ -240,14 +240,23 @@ class Services:
             await self.create_user(demo.user_phone)
 
         existing_demo = await self.get_demo_by_phone(demo.user_phone)
+
+        scheduled_naive = demo.scheduled_at
+        if scheduled_naive.tzinfo is not None:
+            scheduled_naive = scheduled_naive.replace(tzinfo=None)
+
+        reminder_naive = demo.upcoming_reminder_sent_at
+        if reminder_naive is not None and reminder_naive.tzinfo is not None:
+            reminder_naive = reminder_naive.replace(tzinfo=None)
+
         values = {
             "user_phone": demo.user_phone,
             "title": demo.title,
             "duration_minutes": demo.duration_minutes,
             "description": demo.description,
-            "scheduled_at": demo.scheduled_at,
+            "scheduled_at": scheduled_naive,
             "google_calendar_event_id": demo.google_calendar_event_id,
-            "upcoming_reminder_sent_at": demo.upcoming_reminder_sent_at,
+            "upcoming_reminder_sent_at": reminder_naive,
         }
 
         if existing_demo is None:
