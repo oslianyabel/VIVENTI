@@ -22,6 +22,7 @@ class GoogleSheetsRowData:
     fecha: str
     telefono: str
     nombre_contacto: str
+    email: str
     nombre_establecimiento: str
     tipo_experiencia: str
     pais: str
@@ -44,6 +45,7 @@ class GoogleSheetsRowData:
             "fecha": self.fecha,
             "telefono": self.telefono,
             "nombre_contacto": self.nombre_contacto,
+            "email": self.email,
             "nombre_establecimiento": self.nombre_establecimiento,
             "tipo_experiencia": self.tipo_experiencia,
             "pais": self.pais,
@@ -88,6 +90,7 @@ async def build_sheets_row(phone: str) -> GoogleSheetsRowData:
         fecha=datetime.now(UTC).strftime("%Y-%m-%d"),
         telefono=phone,
         nombre_contacto=getattr(user, "name", "") or "",
+        email=getattr(user, "email", "") or "",
         nombre_establecimiento=getattr(user, "establishment_name", "") or "",
         tipo_experiencia=getattr(user, "experience_type", "") or "",
         pais=getattr(user, "country", "") or "",
