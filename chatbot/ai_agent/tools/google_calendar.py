@@ -96,6 +96,15 @@ async def create_google_calendar_event(
         scheduled_at,
     )
 
+    from chatbot.domain.conversation_states import ConversationState
+
+    state = await conversation_state_service.get_state(phone)
+    if state not in {ConversationState.PHASE_3, ConversationState.LOST}:
+        raise ModelRetry(
+            f"La conversación está en {state.value}. "
+            "Solo se puede crear una demo cuando el estado es PHASE_3 o LOST."
+        )
+
     try:
         dt = datetime.fromisoformat(scheduled_at)
         if dt.tzinfo is None:
@@ -201,6 +210,15 @@ async def cancel_google_calendar_event(
     """
     phone = ctx.deps.user_phone
     logger.info("[cancel_google_calendar_event] phone=%s", phone)
+
+    from chatbot.domain.conversation_states import ConversationState
+
+    state = await conversation_state_service.get_state(phone)
+    if state != ConversationState.COMPLETED:
+        raise ModelRetry(
+            f"La conversación está en {state.value}, no en COMPLETED. "
+            "Solo se puede cancelar una demo cuando el estado es COMPLETED."
+        )
 
     existing = await services.get_demo_by_phone(phone)
     if not existing:

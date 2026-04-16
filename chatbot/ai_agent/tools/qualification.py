@@ -78,8 +78,17 @@ async def evaluate_and_transition_phase_2(
     """
     logger.info("[evaluate_and_transition_phase_2] phone=%s", ctx.deps.user_phone)
     from chatbot.db.services import services
+    from chatbot.domain.conversation_states import ConversationState
     from chatbot.domain.qualification import QualificationAnswers
+    from chatbot.services.conversation_state_service import conversation_state_service
     from chatbot.services.lead_orchestrator import orchestrate_after_phase_2
+
+    state = await conversation_state_service.get_state(ctx.deps.user_phone)
+    if state != ConversationState.PHASE_2:
+        raise ModelRetry(
+            f"La conversación está en {state.value}, no en PHASE_2. "
+            "Primero usa phase_1_to_phase_2 para avanzar a PHASE_2."
+        )
 
     user = await services.get_user(ctx.deps.user_phone)
     if not user:
@@ -133,7 +142,16 @@ async def re_evaluate_discard_answers(
     """
     logger.info("[re_evaluate_discard_answers] phone=%s", ctx.deps.user_phone)
     from chatbot.db.services import services
+    from chatbot.domain.conversation_states import ConversationState
+    from chatbot.services.conversation_state_service import conversation_state_service
     from chatbot.services.lead_orchestrator import re_evaluate_discard
+
+    state = await conversation_state_service.get_state(ctx.deps.user_phone)
+    if state != ConversationState.DISCARD:
+        raise ModelRetry(
+            f"La conversación está en {state.value}, no en DISCARD. "
+            "Esta herramienta solo aplica cuando el estado es DISCARD."
+        )
 
     messages = await services.get_recent_messages(ctx.deps.user_phone, hours=72)
     context: list[str] = [f"{msg.role}: {msg.message}" for msg in messages]
