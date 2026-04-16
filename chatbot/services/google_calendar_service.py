@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -26,6 +27,8 @@ BUSINESS_HOURS_START: int = 9
 BUSINESS_HOURS_END: int = 18
 SCOPES: list[str] = ["https://www.googleapis.com/auth/calendar"]
 API_TIMEOUT: int = 15
+CALENDAR_TZ: ZoneInfo = ZoneInfo("America/Montevideo")
+CALENDAR_TZ_NAME: str = "America/Montevideo"
 
 
 class GoogleCalendarError(Exception):
@@ -119,7 +122,7 @@ async def find_available_slots(
         List of available slot start times.
     """
     busy_slots = await list_busy_slots(date_start, date_end)
-    tz = date_start.tzinfo or timezone.utc
+    tz = CALENDAR_TZ
 
     available: list[datetime] = []
     current_date = date_start.date()
@@ -179,11 +182,18 @@ async def create_event(
     start_dt = demo.scheduled_at
     end_dt = start_dt + timedelta(minutes=demo.duration_minutes)
 
+    # Asegurar que el datetime está en timezone Uruguay
+    if start_dt.tzinfo is None:
+        start_dt = start_dt.replace(tzinfo=CALENDAR_TZ)
+    else:
+        start_dt = start_dt.astimezone(CALENDAR_TZ)
+    end_dt = start_dt + timedelta(minutes=demo.duration_minutes)
+
     event_body: dict[str, Any] = {
         "summary": demo.title,
         "description": demo.description,
-        "start": {"dateTime": start_dt.isoformat(), "timeZone": "UTC"},
-        "end": {"dateTime": end_dt.isoformat(), "timeZone": "UTC"},
+        "start": {"dateTime": start_dt.isoformat(), "timeZone": CALENDAR_TZ_NAME},
+        "end": {"dateTime": end_dt.isoformat(), "timeZone": CALENDAR_TZ_NAME},
     }
     if attendee_email:
         event_body["attendees"] = [{"email": attendee_email}]
@@ -241,11 +251,18 @@ async def update_event(
 
     end_dt = new_start + timedelta(minutes=demo.duration_minutes)
 
+    # Asegurar que el datetime está en timezone Uruguay
+    if new_start.tzinfo is None:
+        new_start = new_start.replace(tzinfo=CALENDAR_TZ)
+    else:
+        new_start = new_start.astimezone(CALENDAR_TZ)
+    end_dt = new_start + timedelta(minutes=demo.duration_minutes)
+
     patch_body: dict[str, Any] = {
         "summary": demo.title,
         "description": demo.description,
-        "start": {"dateTime": new_start.isoformat(), "timeZone": "UTC"},
-        "end": {"dateTime": end_dt.isoformat(), "timeZone": "UTC"},
+        "start": {"dateTime": new_start.isoformat(), "timeZone": CALENDAR_TZ_NAME},
+        "end": {"dateTime": end_dt.isoformat(), "timeZone": CALENDAR_TZ_NAME},
     }
     if attendee_email:
         patch_body["attendees"] = [{"email": attendee_email}]

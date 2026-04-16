@@ -44,7 +44,9 @@ async def get_available_slots(
     """
     logger.info("[get_available_slots] date=%s", date)
     try:
-        target = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        from chatbot.services.google_calendar_service import CALENDAR_TZ
+
+        target = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=CALENDAR_TZ)
     except ValueError:
         raise ModelRetry("Formato de fecha inválido. Usa YYYY-MM-DD (ej: 2025-03-15).")
 
@@ -125,7 +127,9 @@ async def create_google_calendar_event(
     try:
         dt = datetime.fromisoformat(scheduled_at)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            from chatbot.services.google_calendar_service import CALENDAR_TZ
+
+            dt = dt.replace(tzinfo=CALENDAR_TZ)
     except ValueError:
         raise ModelRetry(
             "Formato de fecha inválido. Usa ISO 8601 (ej: 2025-03-15T10:00)."
