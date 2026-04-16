@@ -35,6 +35,11 @@ class MyConfig(BaseSettings):  # type: ignore
     GOOGLE_SHEETS_CREDENTIALS_FILE: str
     GOOGLE_SHEETS_SPREADSHEET_ID: str
 
+    # Gmail API
+    GMAIL_CREDENTIALS_FILE: str
+    GMAIL_TOKEN_FILE: str
+    GMAIL_SENDER: str
+
     # Server
     SERVER_HOST: str
 

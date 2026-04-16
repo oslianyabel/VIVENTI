@@ -12,6 +12,8 @@ from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.db.services import services
 from chatbot.domain.demo import DemoRecord
 from chatbot.services import conversation_state_service
+from chatbot.services.gmail_service import GmailServiceError
+from chatbot.services.gmail_service import send_demo_invitation as _send_invitation
 from chatbot.services.google_calendar_service import (
     DEMO_DURATION_MINUTES,
     GoogleCalendarError,
@@ -144,7 +146,7 @@ async def create_google_calendar_event(
     )
 
     try:
-        event_id = await _create_event(demo, attendee_email)
+        event_id, html_link = await _create_event(demo, attendee_email)
     except GoogleCalendarError as exc:
         logger.error("[create_google_calendar_event] %s", exc)
         raise ModelRetry(
@@ -160,6 +162,27 @@ async def create_google_calendar_event(
     elif state == ConversationState.PHASE_3:
         await conversation_state_service.phase_3_to_completed(phone)
     # Si ya estaba en COMPLETED, no se necesita transición
+
+    if attendee_email:
+        recipient_name = attendee_email.split("@")[0].capitalize()
+        try:
+            await _send_invitation(
+                to_email=attendee_email,
+                recipient_name=recipient_name,
+                scheduled_at=dt,
+                duration_minutes=DEMO_DURATION_MINUTES,
+                description=description,
+                calendar_link=html_link,
+            )
+            logger.info(
+                "[create_google_calendar_event] Invitation email sent to %s",
+                attendee_email,
+            )
+        except GmailServiceError as exc:
+            logger.error(
+                "[create_google_calendar_event] Failed to send invitation email: %s",
+                exc,
+            )
 
     return (
         f"Demo agendada para el {dt.strftime('%d/%m/%Y a las %H:%M')} hs. "

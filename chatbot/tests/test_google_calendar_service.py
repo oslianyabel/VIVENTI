@@ -84,12 +84,13 @@ async def test_create_event_returns_event_id() -> None:
     global _created_event_id
 
     demo = _make_demo()
-    event_id = await create_event(demo, attendee_email=None)
+    event_id, html_link = await create_event(demo, attendee_email=None)
 
     assert isinstance(event_id, str)
     assert len(event_id) > 0
+    assert html_link.startswith("https://")
     _created_event_id = event_id
-    print(f"[OK] create_event returned event_id={event_id}")
+    print(f"[OK] create_event returned event_id={event_id} html_link={html_link}")
 
 
 # ── 4. get_event ────────────────────────────────────────────────────────────

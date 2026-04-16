@@ -166,7 +166,7 @@ async def find_available_slots(
 async def create_event(
     demo: DemoRecord,
     attendee_email: str | None = None,
-) -> str:
+) -> tuple[str, str]:
     """Create a Google Calendar event for a demo.
 
     Args:
@@ -174,7 +174,7 @@ async def create_event(
         attendee_email: Optional email to add as attendee.
 
     Returns:
-        The Google Calendar event ID.
+        Tuple of (event_id, html_link) for the created event.
     """
     service = _get_calendar_service()
     calendar_id = config.GOOGLE_CALENDAR_ID
@@ -227,8 +227,9 @@ async def create_event(
             ) from exc
 
     event_id: str = created["id"]
+    html_link: str = created.get("htmlLink", "")
     logger.info("[google_calendar] Created event %s for %s", event_id, demo.user_phone)
-    return event_id
+    return event_id, html_link
 
 
 async def update_event(
