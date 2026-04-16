@@ -1,12 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 
 from chatbot.db.services import Services, services
 from chatbot.domain.conversation_states import ConversationState, can_transition
 
+logger = logging.getLogger(__name__)
+
 TransitionHook = Callable[[str, ConversationState, ConversationState], Awaitable[None]]
+
+# States that trigger automatic Google Sheets sync
+_SHEETS_SYNC_STATES: frozenset[ConversationState] = frozenset(
+    {
+        ConversationState.COMPLETED,
+        ConversationState.LOST,
+        ConversationState.DISCARD,
+    }
+)
 
 
 class InvalidConversationStateTransitionError(ValueError):
@@ -32,6 +44,7 @@ class ConversationStateService:
         self._state_cache: dict[str, ConversationState] = {}
         self._lock = asyncio.Lock()
         self._after_transition_hooks: list[TransitionHook] = []
+        self._register_default_hooks()
 
     async def preload_active_users(self) -> None:
         async with self._lock:
@@ -40,6 +53,34 @@ class ConversationStateService:
                 user.phone: ConversationState(user.conversation_state)
                 for user in active_users
             }
+
+    def _register_default_hooks(self) -> None:
+        """Register built-in post-transition hooks."""
+        self.register_after_transition_hook(self._sync_google_sheets_hook)
+
+    @staticmethod
+    async def _sync_google_sheets_hook(
+        phone: str,
+        _source: ConversationState,
+        target: ConversationState,
+    ) -> None:
+        """Trigger Google Sheets sync as a background task for terminal states."""
+        if target not in _SHEETS_SYNC_STATES:
+            return
+
+        async def _do_sync() -> None:
+            try:
+                from chatbot.services.google_sheets_sync import sync_user_to_sheets
+
+                await sync_user_to_sheets(phone)
+            except Exception as exc:
+                logger.error(
+                    "[sheets_hook] Failed to sync phone=%s to Sheets: %s",
+                    phone,
+                    exc,
+                )
+
+        asyncio.create_task(_do_sync())
 
     def register_after_transition_hook(self, hook: TransitionHook) -> None:
         self._after_transition_hooks.append(hook)

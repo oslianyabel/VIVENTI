@@ -12,6 +12,7 @@ from chatbot.core.config import config
 from chatbot.core.logging_conf import init_logging
 from chatbot.core.sentry import init_sentry
 from chatbot.db.services import services
+from chatbot.reminders.scheduler import start_scheduler
 from chatbot.services import conversation_state_service
 
 init_logging()
@@ -25,9 +26,11 @@ async def lifespan(app: FastAPI):
     init_sentry()
     create_dirs()
     await conversation_state_service.preload_active_users()
+    scheduler_task = await start_scheduler()
 
     yield
 
+    scheduler_task.cancel()
     try:
         await services.database.disconnect()
         logger.info("Disconnected from database")

@@ -1,8 +1,5 @@
 """Telegram chatbot entry point using the VIVENTI AI agent.
 
-On first interaction (or via /start) the user is asked to provide their phone
-number, which is stored in ``_user_phones`` (keyed by Telegram chat_id).
-That phone is then passed as ``user_phone`` in AgentDeps on every AI call.
 The Telegram chat_id is used as the conversation identifier in the DB and as
 ``telegram_id`` in AgentDeps.
 
@@ -30,11 +27,8 @@ from chatbot.ai_agent import get_viventi_agent
 from chatbot.ai_agent.agent import FALLBACK_MODEL
 from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.ai_agent.error_agent import run_error_agent
-from chatbot.api.utils import message_handler, telegram_commands
-from chatbot.api.utils.telegram_commands import (
-    cmd_get_phone,
-    cmd_test_dev_notifications,
-)
+from chatbot.api.utils import message_handler
+from chatbot.api.utils.telegram_commands import cmd_test_dev_notifications
 from chatbot.api.utils.text import strip_markdown
 from chatbot.api.utils.webhook_parser import (
     create_or_retrieve_documents_dir,
@@ -48,6 +42,7 @@ from chatbot.core.logging_conf import init_logging
 from chatbot.db.services import services
 from chatbot.messaging.telegram_notifier import notify_error
 from chatbot.messaging.whatsapp import WhatsAppManager
+from chatbot.services.message_processor import pre_agent_processing
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +54,6 @@ CHANNEL_MARKERS: dict[str, str] = {
     CHANNEL_TELEGRAM: "CHANNEL: telegram",
     CHANNEL_WHATSAPP: "CHANNEL: whatsapp",
 }
-
-_user_phones: dict[str, str] = {}
-_pending_phone: set[str] = set()
 
 _noop_whatsapp = WhatsAppManager()
 
@@ -120,37 +112,11 @@ async def _handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not update.message or not update.effective_chat:
         return
     user = update.effective_user
-    chat_id = str(update.effective_chat.id)
-
-    if chat_id not in _user_phones:
-        _pending_phone.add(chat_id)
-        await update.message.reply_text(
-            f"Hello{', ' + user.first_name if user else ''}!\n"
-            "I'm the VIVENTI assistant.\n\n"
-            "Before we begin, I need your phone number (including country code, for example: +59899000000):",
-            do_quote=True,
-        )
-    else:
-        await update.message.reply_text(
-            f"Hello{', ' + user.first_name if user else ''}!\n"
-            "I'm the VIVENTI assistant. How can I help you today?",
-            do_quote=True,
-        )
-
-
-async def _handle_change_phone(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """/change_phone allows the user to update their registered phone number."""
-    if not update.message or not update.effective_chat:
-        return
-    chat_id = str(update.effective_chat.id)
-    _pending_phone.add(chat_id)
     await update.message.reply_text(
-        "Please enter your new phone number (including country code, for example: +59899000000):",
+        f"Hello{', ' + user.first_name if user else ''}!\n"
+        "I'm the VIVENTI assistant. How can I help you today?",
         do_quote=True,
     )
-    logger.info("'/change_phone' requested by telegram_id=%s", chat_id)
 
 
 async def _handle_restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -197,6 +163,12 @@ async def _handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await tg_file.download_to_drive(str(file_path))
         logger.info("[image] Saved Telegram image to %s", file_path)
 
+        await update.message.reply_text(
+            "File processing is not available at the moment. "
+            "Please describe what you need in a text message.",
+            do_quote=True,
+        )
+
     except Exception as exc:
         logger.exception("Error saving image for telegram_id=%s: %s", chat_id, exc)
         await notify_error(
@@ -213,25 +185,22 @@ async def _handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     chat_id: str = str(update.effective_chat.id)
     doc = update.message.document
 
-    if doc.mime_type != "application/pdf":
-        logger.warning(
-            "[pdf] Unsupported mime_type=%s from telegram_id=%s", doc.mime_type, chat_id
-        )
-        await update.message.reply_text(
-            "Only PDF documents are supported at this time.",
-            do_quote=True,
-        )
-        return
-
     try:
         tg_file = await doc.get_file()
         documents_dir = create_or_retrieve_documents_dir()
-        file_path = documents_dir / f"{chat_id}.pdf"
+        original_name: str = doc.file_name or f"{chat_id}"
+        file_path = documents_dir / f"{chat_id}_{original_name}"
         await tg_file.download_to_drive(str(file_path))
-        logger.info("[pdf] Saved Telegram PDF to %s", file_path)
+        logger.info("[document] Saved Telegram document to %s", file_path)
+
+        await update.message.reply_text(
+            "File processing is not available at the moment. "
+            "Please describe what you need in a text message.",
+            do_quote=True,
+        )
 
     except Exception as exc:
-        logger.exception("Error saving PDF for telegram_id=%s: %s", chat_id, exc)
+        logger.exception("Error saving document for telegram_id=%s: %s", chat_id, exc)
         await notify_error(
             exc,
             context=f"telegram_bot._handle_document | chat_id={chat_id}",
@@ -259,6 +228,7 @@ async def _run_agent_and_reply(
             message=CHANNEL_MARKERS[CHANNEL_TELEGRAM],
         )
         await message_handler.save_user_msg(chat_id, incoming_msg)
+        await pre_agent_processing(chat_id)
 
         async def _send_photo_tg(image_bytes: bytes, caption: str) -> None:
             if update.message is None:
@@ -270,7 +240,7 @@ async def _run_agent_and_reply(
         deps = AgentDeps(
             db_services=services,
             whatsapp_client=_noop_whatsapp,
-            user_phone=_user_phones.get(chat_id, ""),
+            user_phone=chat_id,
             telegram_id=chat_id,
             send_photo_callback=_send_photo_tg,
         )
@@ -384,26 +354,6 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     incoming_msg: str = update.message.text
 
     try:
-        if chat_id in _pending_phone:
-            phone = incoming_msg.strip()
-            _user_phones[chat_id] = phone
-            _pending_phone.discard(chat_id)
-            logger.info("Phone registered for telegram_id=%s: %s", chat_id, phone)
-            await update.message.reply_text(
-                f"Perfect! Your number {phone} has been registered. How can I help you today?",
-                do_quote=True,
-            )
-            return
-
-        if chat_id not in _user_phones:
-            _pending_phone.add(chat_id)
-            await update.message.reply_text(
-                "Before we continue, I need your phone number "
-                "(including country code, for example: +59899000000):",
-                do_quote=True,
-            )
-            return
-
         await _run_agent_and_reply(chat_id, chat_id_int, incoming_msg, update, context)
 
     except Exception as exc:
@@ -431,23 +381,6 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     chat_id: str = str(chat_id_int)
 
     try:
-        if chat_id in _pending_phone:
-            await update.message.reply_text(
-                "I need your phone number before I can process voice notes. "
-                "Please send it as text (including country code, for example: +59899000000).",
-                do_quote=True,
-            )
-            return
-
-        if chat_id not in _user_phones:
-            _pending_phone.add(chat_id)
-            await update.message.reply_text(
-                "Before we continue, I need your phone number "
-                "(including country code, for example: +59899000000):",
-                do_quote=True,
-            )
-            return
-
         tg_file = await update.message.voice.get_file()
         voice_dir = create_or_retrieve_voice_dir()
         file_path = voice_dir / f"{chat_id}.oga"
@@ -517,7 +450,6 @@ async def _post_init(application: Application) -> None:
     init_logging()
     logger.info("VIVENTI Bot starting up")
     await services.database.connect()
-    telegram_commands.init_phones(_user_phones)
     logger.info("DB connected")
 
 
@@ -547,14 +479,12 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("restart", _handle_restart))
     app.add_handler(CommandHandler("cancelar", _handle_cancel))
     app.add_handler(CommandHandler("cancel", _handle_cancel))
-    app.add_handler(CommandHandler("change_phone", _handle_change_phone))
-    app.add_handler(CommandHandler("get_phone", cmd_get_phone))
     app.add_handler(
         CommandHandler("test_dev_notifications", cmd_test_dev_notifications)
     )
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
     app.add_handler(MessageHandler(filters.VOICE, _handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, _handle_image))
-    app.add_handler(MessageHandler(filters.Document.PDF, _handle_document))
+    app.add_handler(MessageHandler(filters.Document.ALL, _handle_document))
 
     return app

@@ -1,7 +1,6 @@
 """Direct tool commands for the Telegram bot.
 
 Commands registered:
-  /get_phone
   /test_dev_notifications
 """
 
@@ -22,48 +21,7 @@ from chatbot.messaging.telegram_notifier import (
 
 logger = logging.getLogger(__name__)
 
-_phones_registry: dict[str, str] = {}
-
 _MAX_MSG_LEN = 4000
-
-
-def init_phones(phones: dict[str, str]) -> None:
-    """Share the phone registry from telegram_bot. Must be called during bot post_init."""
-    global _phones_registry
-    _phones_registry = phones
-    logger.debug("telegram_commands: phones registry linked")
-
-
-def _get_registered_phone(chat_id: str) -> str | None:
-    """Return the registered phone number for a Telegram chat, if present."""
-    phone = _phones_registry.get(chat_id, "").strip()
-    return phone or None
-
-
-# ---------------------------------------------------------------------------
-# /get_phone
-# ---------------------------------------------------------------------------
-
-
-async def cmd_get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/get_phone — shows the phone number registered in the bot memory."""
-    del context
-    if not update.message or not update.effective_chat:
-        return
-
-    chat_id = str(update.effective_chat.id)
-    phone = _get_registered_phone(chat_id)
-    if not phone:
-        await update.message.reply_text(
-            "⚠️ No phone number is registered for this chat. Use `/change_phone` or send your number first.",
-            parse_mode="Markdown",
-        )
-        return
-
-    await update.message.reply_text(
-        f"📱 Registered phone for this chat: `{phone}`",
-        parse_mode="Markdown",
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -86,15 +44,14 @@ async def cmd_test_dev_notifications(
         return
 
     chat_id = str(update.effective_chat.id)
-    phone = _get_registered_phone(chat_id) or "not_registered"
 
     await notify_error(
         RuntimeError("Telegram dev notification test"),
-        context=f"telegram_cmd_test | chat_id={chat_id} | phone={phone}",
+        context=f"telegram_cmd_test | chat_id={chat_id}",
     )
 
     slow_response_message = _build_slow_response_message(
-        phone=phone,
+        phone=chat_id,
         user_message="Developer notification test triggered from Telegram command.",
         tools_used=["notify_error", "_build_slow_response_message"],
         ai_response="This is a synthetic slow-response message generated from /test_dev_notifications.",

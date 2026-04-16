@@ -24,6 +24,7 @@ from chatbot.core.config import config
 from chatbot.db.services import services
 from chatbot.messaging.telegram_notifier import notify_error, notify_slow_response
 from chatbot.messaging.whatsapp import whatsapp_manager
+from chatbot.services.message_processor import pre_agent_processing
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -130,6 +131,7 @@ async def _process_message(message: Message) -> None:
             message=CHANNEL_MARKERS[CHANNEL_WHATSAPP],
         )
         await message_handler.save_user_msg(user_number, incoming_msg)
+        await pre_agent_processing(user_number)
 
         async def _send_photo_wa(image_bytes: bytes, caption: str) -> None:
             media_id = await whatsapp_manager.upload_media_bytes(image_bytes)

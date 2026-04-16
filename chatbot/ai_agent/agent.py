@@ -1,16 +1,39 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import ToolDefinition
 
 from chatbot.ai_agent.dependencies import AgentDeps
+from chatbot.ai_agent.instructions import register_instructions
 from chatbot.ai_agent.models import GoogleModel
 from chatbot.ai_agent.prompts import SYSTEM_PROMPT
 from chatbot.ai_agent.tools.date_resolver import resolve_relative_date
+from chatbot.ai_agent.tools.google_calendar import (
+    cancel_google_calendar_event,
+    create_google_calendar_event,
+    get_available_slots,
+    get_user_demo_scheduled,
+    update_google_calendar_event,
+)
+from chatbot.ai_agent.tools.google_sheets import (
+    add_google_sheets_data,
+    get_google_sheets_data,
+)
+from chatbot.ai_agent.tools.qualification import (
+    evaluate_and_transition_phase_2,
+    re_evaluate_discard_answers,
+    save_phase_2_answers,
+)
+from chatbot.ai_agent.tools.state_transitions import (
+    lost_to_completed,
+    phase_1_to_phase_2,
+    phase_3_to_completed,
+    phase_3_to_lost,
+)
+from chatbot.ai_agent.tools.user_data import update_user_data
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +57,29 @@ def _once_per_turn(tool_name: str):
 
 
 AGENT_TOOLS = [
-    # Date resolution sub-agent
+    # Date resolution
     resolve_relative_date,
+    # State transitions
+    phase_1_to_phase_2,
+    phase_3_to_completed,
+    phase_3_to_lost,
+    lost_to_completed,
+    # Read-only
+    get_available_slots,
+    get_google_sheets_data,
+    # Data persistence
+    update_user_data,
+    save_phase_2_answers,
+    # Composite
+    evaluate_and_transition_phase_2,
+    re_evaluate_discard_answers,
+    # Google Calendar
+    create_google_calendar_event,
+    update_google_calendar_event,
+    cancel_google_calendar_event,
+    get_user_demo_scheduled,
+    # Google Sheets
+    add_google_sheets_data,
 ]
 
 
@@ -64,29 +108,6 @@ def get_viventi_agent() -> Agent[AgentDeps, str]:
             tools=AGENT_TOOLS,
             model_settings=ModelSettings(temperature=0),
         )
-
-        @_viventi_agent.instructions
-        def reply_in_user_language_prompt(
-            ctx: RunContext[AgentDeps],
-        ) -> str:
-            return (
-                "Always reply in the same language as the user's most recent message. "
-                "Ignore the language used by this system prompt, tool schemas, tool outputs, "
-                "or ERP data. If any tool returns content in a different language, translate "
-                "or adapt it before answering. If the user writes in Spanish, use Rioplatense Spanish."
-            )
-
-        @_viventi_agent.instructions
-        def current_datetime_prompt(
-            ctx: RunContext[AgentDeps],
-        ) -> str:
-            now = datetime.now(tz=timezone.utc).astimezone()
-            return (
-                f"Current date and time: {now.strftime('%A %d %B %Y, %H:%M')} "
-                f"(server timezone: {now.strftime('%Z %z')}). "
-                "Use this date to resolve expressions such as tomorrow, next week, next month, "
-                "or in N days."
-            )
-
+        register_instructions(_viventi_agent)
         logger.info("VIVENTI agent initialized with %d tools", len(AGENT_TOOLS))
     return _viventi_agent

@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-
 from chatbot.db.services import Services
 from chatbot.messaging.whatsapp import WhatsAppManager
 

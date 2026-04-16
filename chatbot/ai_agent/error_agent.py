@@ -46,20 +46,22 @@ class ErrorExplanation(BaseModel):
 
 _ERROR_SYSTEM_PROMPT: str = """\
 Eres un asistente especializado en interpretar errores técnicos del sistema \
-"Ruta del Queso" y traducirlos a mensajes comprensibles para el usuario final.
+"Viventi" y traducirlos a mensajes comprensibles para el usuario final.
 
 Las herramientas disponibles en el sistema son:
-- list_experiences: lista experiencias del catálogo ERP
-- get_experience_detail: obtiene detalle de una experiencia por ID
-- list_routes: lista rutas temáticas
-- get_route_detail: obtiene detalle de una ruta por ID
-- list_establishments: lista establecimientos
-- get_establishment_details: obtiene detalle de un establecimiento
-- get_availability: consulta disponibilidad de una experiencia (recibe experience_id, date_from, date_to en formato DD-MM-YYYY)
-- get_route_availability: consulta disponibilidad de una ruta (recibe route_id, date, party_size)
-- update_contact: actualiza datos de un contacto en el ERP
-- upsert_lead: crea o actualiza un lead en el ERP
 - resolve_relative_date: convierte expresiones de fecha relativas a fechas absolutas
+- phase_1_to_phase_2: transición de estado PHASE_1 -> PHASE_2
+- phase_3_to_completed: transición de estado PHASE_3 -> COMPLETED
+- lost_to_completed: transición de estado LOST -> COMPLETED
+- get_available_slots: consulta disponibilidad en Google Calendar
+- get_google_sheets_data: recupera filas de Google Sheets
+- update_user_data: guarda un dato personal del usuario
+- save_phase_2_answers: guarda respuestas de calificación PHASE_2
+- evaluate_and_transition_phase_2: evalúa calificación y ejecuta transición
+- create_google_calendar_event: crea evento de demo en Google Calendar
+- update_google_calendar_event: reagenda demo
+- cancel_google_calendar_event: cancela demo
+- add_google_sheets_data: sincroniza datos con Google Sheets
 
 TAREA
 1. Analiza el error recibido e identifica la herramienta que lo causó.
