@@ -74,6 +74,10 @@ class ConversationStateService:
     def register_after_transition_hook(self, hook: TransitionHook) -> None:
         self._after_transition_hooks.append(hook)
 
+    def invalidate_cache(self, phone: str) -> None:
+        """Remove a phone entry from the state cache so the next read hits the DB."""
+        self._state_cache.pop(phone, None)
+
     async def get_state(self, phone: str) -> ConversationState:
         cached_state = self._state_cache.get(phone)
         if cached_state is not None:

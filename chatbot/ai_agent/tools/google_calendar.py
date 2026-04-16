@@ -99,11 +99,28 @@ async def create_google_calendar_event(
     from chatbot.domain.conversation_states import ConversationState
 
     state = await conversation_state_service.get_state(phone)
-    if state not in {ConversationState.PHASE_3, ConversationState.LOST}:
+    if state not in {
+        ConversationState.PHASE_3,
+        ConversationState.LOST,
+        ConversationState.COMPLETED,
+    }:
         raise ModelRetry(
             f"La conversación está en {state.value}. "
-            "Solo se puede crear una demo cuando el estado es PHASE_3 o LOST."
+            "Solo se puede crear una demo cuando el estado es PHASE_3, LOST o COMPLETED."
         )
+
+    # Si ya existe una demo en COMPLETED, cancelar el evento viejo primero
+    if state == ConversationState.COMPLETED:
+        existing_demo = await services.get_demo_by_phone(phone)
+        if existing_demo and existing_demo.google_calendar_event_id:
+            try:
+                await _cancel_event(existing_demo.google_calendar_event_id)
+                logger.info(
+                    "[create_google_calendar_event] Cancelled old event %s before recreating",
+                    existing_demo.google_calendar_event_id,
+                )
+            except GoogleCalendarError:
+                pass  # El evento viejo puede no existir ya
 
     try:
         dt = datetime.fromisoformat(scheduled_at)
@@ -136,8 +153,9 @@ async def create_google_calendar_event(
 
     if state == ConversationState.LOST:
         await conversation_state_service.lost_to_completed(phone)
-    else:
+    elif state == ConversationState.PHASE_3:
         await conversation_state_service.phase_3_to_completed(phone)
+    # Si ya estaba en COMPLETED, no se necesita transición
 
     return (
         f"Demo agendada para el {dt.strftime('%d/%m/%Y a las %H:%M')} hs. "

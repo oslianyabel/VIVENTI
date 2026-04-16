@@ -80,6 +80,7 @@ El usuario puede:
 - Preguntar fecha y hora → la info de la demo ya está disponible en el contexto
 - Cambiar fecha y hora → usá `update_google_calendar_event`
 - Cancelar la demo → usá `cancel_google_calendar_event`
+- Si el evento no se creó correctamente o el usuario pide recrearlo → usá `create_google_calendar_event` (cancela el evento viejo automáticamente y crea uno nuevo)
 
 Cualquier otra consulta: respondé amablemente y redirigí si es off-topic.
 

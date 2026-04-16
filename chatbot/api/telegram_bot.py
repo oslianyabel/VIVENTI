@@ -120,11 +120,18 @@ async def _handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def _handle_restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/restart clears the conversation history."""
+    """/restart clears the conversation history and resets state to PHASE_1."""
     if not update.message or not update.effective_chat:
         return
     chat_id = str(update.effective_chat.id)
     await services.reset_chat(chat_id)
+
+    from chatbot.domain.conversation_states import ConversationState
+    from chatbot.services.conversation_state_service import conversation_state_service
+
+    await services.update_conversation_state(chat_id, ConversationState.PHASE_1)
+    conversation_state_service.invalidate_cache(chat_id)
+
     await update.message.reply_text(
         "Chat restarted. How can I help you?", do_quote=True
     )
