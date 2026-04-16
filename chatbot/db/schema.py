@@ -112,9 +112,24 @@ def init_db() -> databases.Database:
             logger.info(
                 f"🔄 Attempting to create tables (attempt {attempt}/{DB_MAX_RETRIES})..."
             )
-            metadata.create_all(engine)
+            # Only create tables that don't already exist
+            metadata.create_all(engine, checkfirst=True)
             logger.info("✅ Database tables created/verified successfully")
             break
+        except sqlalchemy.exc.ProgrammingError as prog_exc:
+            if "permission denied" in str(prog_exc).lower():
+                logger.warning(
+                    "⚠️ No CREATE privilege on schema — assuming tables already exist"
+                )
+                break
+            logger.error(
+                f"❌ Database connection failed (attempt {attempt}/{DB_MAX_RETRIES}): {prog_exc}"
+            )
+            if attempt < DB_MAX_RETRIES:
+                logger.info(f"⏳ Retrying in {DB_RETRY_DELAY} seconds...")
+                time.sleep(DB_RETRY_DELAY)
+            else:
+                raise
         except Exception as exc:
             logger.error(
                 f"❌ Database connection failed (attempt {attempt}/{DB_MAX_RETRIES}): {exc}"
