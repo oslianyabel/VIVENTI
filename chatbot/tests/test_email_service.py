@@ -1,9 +1,5 @@
-# uv run pytest -s chatbot/tests/test_gmail_service.py
-"""Integration tests for Gmail service — real API calls.
-
-These tests send actual emails via the Gmail API using the pre-authorized
-token. Run manually to verify email delivery.
-"""
+# uv run pytest -s chatbot/tests/test_email_service.py
+"""Integration tests for Email service (Resend) — real API calls."""
 
 from __future__ import annotations
 
@@ -13,21 +9,21 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from chatbot.services.gmail_service import send_demo_invitation
+from chatbot.services.email_service import send_demo_invitation
 
 logger = logging.getLogger(__name__)
 
 CALENDAR_TZ = ZoneInfo("America/Montevideo")
 
 
-# uv run pytest -s chatbot/tests/test_gmail_service.py::test_send_demo_invitation_email
+# uv run pytest -s chatbot/tests/test_email_service.py::test_send_demo_invitation_email
 @pytest.mark.asyncio
 async def test_send_demo_invitation_email() -> None:
-    """send_demo_invitation should send an email without raising errors.
+    """send_demo_invitation should send an email via Resend without raising errors.
 
-    Check osliani_freelance@proton.me inbox to verify delivery.
+    If using onboarding@resend.dev, ensure to_email is your account email.
     """
-    to_email = "osliani_freelance@proton.me"
+    to_email = "oslianyabel@gmail.com"
     scheduled_at = datetime(2026, 4, 25, 10, 0, tzinfo=CALENDAR_TZ)
 
     await send_demo_invitation(
@@ -42,4 +38,4 @@ async def test_send_demo_invitation_email() -> None:
         calendar_link="https://www.google.com/calendar/event?eid=test_event_id",
     )
 
-    print(f"[OK] Demo invitation email sent to {to_email}. Check inbox.")
+    print(f"[OK] Demo invitation email sent to {to_email} via Resend.")

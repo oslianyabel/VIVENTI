@@ -1,47 +1,22 @@
-"""Gmail API service — sends transactional emails via OAuth 2.0.
-
-Uses a pre-authorized token (gmail_token.json) generated once with
-scripts/authorize_gmail.py. The token is refreshed automatically when
-it expires.
-"""
+"""Email service using Resend API."""
 
 from __future__ import annotations
 
-import asyncio
-import base64
 import logging
 from datetime import datetime
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from functools import partial
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+import resend
 
 from chatbot.core.config import config
 
 logger = logging.getLogger(__name__)
 
-SCOPES: list[str] = ["https://www.googleapis.com/auth/gmail.send"]
+# Configure Resend
+resend.api_key = config.RESEND_API_KEY
 
 
-class GmailServiceError(Exception):
-    """Raised when the Gmail API returns an unexpected error."""
-
-
-def _get_gmail_service():
-    """Build and return an authorized Gmail API service instance."""
-    creds = Credentials.from_authorized_user_file(config.GMAIL_TOKEN_FILE, SCOPES)
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-    return build("gmail", "v1", credentials=creds)
-
-
-async def _run_in_executor(func, *args):
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, partial(func, *args))
+class EmailServiceError(Exception):
+    """Raised when the Resend API returns an error."""
 
 
 def _build_demo_invitation_html(
@@ -107,20 +82,8 @@ async def send_demo_invitation(
     description: str,
     calendar_link: str,
 ) -> None:
-    """Send a demo invitation email via Gmail API.
-
-    Args:
-        to_email: Recipient email address.
-        recipient_name: Recipient's first name for personalization.
-        scheduled_at: Demo datetime (timezone-aware).
-        duration_minutes: Duration of the demo in minutes.
-        description: Short description of what will be covered.
-        calendar_link: Google Calendar event HTML link.
-
-    Raises:
-        GmailServiceError: If the Gmail API returns an error.
-    """
-    logger.info("[gmail_service] Sending demo invitation to %s", to_email)
+    """Send a demo invitation email via Resend API."""
+    logger.info("[email_service] Sending demo invitation to %s", to_email)
 
     formatted_date = scheduled_at.strftime("%d/%m/%Y a las %H:%M")
     subject = f"Tu demo de Viventi — {formatted_date} hs"
@@ -133,26 +96,17 @@ async def send_demo_invitation(
         calendar_link=calendar_link,
     )
 
-    message = MIMEMultipart("alternative")
-    message["to"] = to_email
-    message["from"] = config.GMAIL_SENDER
-    message["subject"] = subject
-    message.attach(MIMEText(html_body, "html"))
-
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-
-    service = _get_gmail_service()
-
-    def _send():
-        return service.users().messages().send(userId="me", body={"raw": raw}).execute()
-
     try:
-        result = await _run_in_executor(_send)
-    except HttpError as exc:
-        raise GmailServiceError(f"Failed to send email to {to_email}: {exc}") from exc
-
-    logger.info(
-        "[gmail_service] Email sent to %s message_id=%s",
-        to_email,
-        result.get("id"),
-    )
+        params: resend.Emails.SendParams = {
+            "from": config.GMAIL_SENDER,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_body,
+        }
+        r = resend.Emails.send(params)
+        logger.info(
+            "[email_service] Email sent successfully to %s, id: %s", to_email, r["id"]
+        )
+    except Exception as exc:
+        logger.error("[email_service] Error sending email via Resend: %s", exc)
+        raise EmailServiceError(f"Failed to send email to {to_email}: {exc}") from exc

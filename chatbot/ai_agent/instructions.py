@@ -108,3 +108,20 @@ def register_instructions(agent: Agent[AgentDeps, str]) -> None:
             f"{dt.strftime('%d/%m/%Y %H:%M')} — "
             f"{demo.duration_minutes} min"
         )
+
+    @agent.instructions
+    async def persist_user_language(
+        ctx: RunContext[AgentDeps],
+    ) -> str:
+        from chatbot.db.services import services
+
+        user = await services.get_user(ctx.deps.user_phone)
+        language = getattr(user, "language", None) if user else None
+        if language:
+            return ""
+        return (
+            "El campo `language` del usuario aún no está guardado en la base de datos. "
+            "Detectá el idioma que el usuario está usando (código ISO 639-1, por ejemplo: "
+            "'es', 'pt', 'en', 'fr') y llamá `update_user_data` con "
+            "`field_name='language'` y el código detectado ANTES de responder al usuario."
+        )

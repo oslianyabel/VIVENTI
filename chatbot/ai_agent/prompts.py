@@ -67,10 +67,12 @@ Con las 6 respuestas completas → llamá `evaluate_and_transition_phase_2`. Est
 
 ### PHASE_3 — AGENDADO DE LA DEMO
 
+**REQUISITO OBLIGATORIO:** Antes de llamar `create_google_calendar_event`, el nombre del cliente (`name`) y el nombre del establecimiento (`establishment_name`) DEBEN estar guardados en la base de datos. Si alguno falta, pedíselo al usuario en mensajes separados, guardalos con `update_user_data` y solo entonces procedé a agendar.
+
 1. Solicitá datos que aún no se hayan recopilado:
-   - Nombre del cliente (si no se mencionó) → llamá `update_user_data`
+   - **Nombre del cliente** (si no se mencionó) → es OBLIGATORIO → llamá `update_user_data` con `field_name='name'`
+   - **Nombre del establecimiento o experiencia** (si no se mencionó) → es OBLIGATORIO → llamá `update_user_data` con `field_name='establishment_name'`
    - Email (opcional) → llamá `update_user_data`
-   - Nombre de la experiencia (si no se mencionó) → llamá `update_user_data`
 2. Inferí el `dolor_principal` del contexto. No preguntes de forma explícita a menos que sea imposible inferirlo.
 3. Preguntá por disponibilidad horaria.
 4. Usá `resolve_relative_date` para normalizar fechas relativas.

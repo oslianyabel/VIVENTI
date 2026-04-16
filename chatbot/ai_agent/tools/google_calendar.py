@@ -12,8 +12,8 @@ from chatbot.ai_agent.dependencies import AgentDeps
 from chatbot.db.services import services
 from chatbot.domain.demo import DemoRecord
 from chatbot.services import conversation_state_service
-from chatbot.services.gmail_service import GmailServiceError
-from chatbot.services.gmail_service import send_demo_invitation as _send_invitation
+from chatbot.services.email_service import EmailServiceError
+from chatbot.services.email_service import send_demo_invitation as _send_invitation
 from chatbot.services.google_calendar_service import (
     DEMO_DURATION_MINUTES,
     GoogleCalendarError,
@@ -100,6 +100,20 @@ async def create_google_calendar_event(
         scheduled_at,
     )
 
+    # Validate required fields before scheduling
+    user = await services.get_user(phone)
+    missing: list[str] = []
+    if not getattr(user, "name", None):
+        missing.append("nombre_contacto (field: name)")
+    if not getattr(user, "establishment_name", None):
+        missing.append("nombre_establecimiento (field: establishment_name)")
+    if missing:
+        raise ModelRetry(
+            "No se puede agendar la demo porque faltan datos obligatorios: "
+            + ", ".join(missing)
+            + ". Pedile al usuario esos datos, guardalos con `update_user_data` y luego intentá de nuevo."
+        )
+
     from chatbot.domain.conversation_states import ConversationState
 
     state = await conversation_state_service.get_state(phone)
@@ -178,7 +192,7 @@ async def create_google_calendar_event(
                 "[create_google_calendar_event] Invitation email sent to %s",
                 attendee_email,
             )
-        except GmailServiceError as exc:
+        except EmailServiceError as exc:
             logger.error(
                 "[create_google_calendar_event] Failed to send invitation email: %s",
                 exc,
