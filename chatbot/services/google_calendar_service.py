@@ -94,6 +94,10 @@ async def list_busy_slots(
         end_str = event["end"].get("dateTime", event["end"].get("date"))
         start = datetime.fromisoformat(start_str)
         end = datetime.fromisoformat(end_str)
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
         busy.append((start, end))
 
     return busy

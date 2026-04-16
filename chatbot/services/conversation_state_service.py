@@ -11,15 +11,6 @@ logger = logging.getLogger(__name__)
 
 TransitionHook = Callable[[str, ConversationState, ConversationState], Awaitable[None]]
 
-# States that trigger automatic Google Sheets sync
-_SHEETS_SYNC_STATES: frozenset[ConversationState] = frozenset(
-    {
-        ConversationState.COMPLETED,
-        ConversationState.LOST,
-        ConversationState.DISCARD,
-    }
-)
-
 
 class InvalidConversationStateTransitionError(ValueError):
     def __init__(
@@ -64,9 +55,7 @@ class ConversationStateService:
         _source: ConversationState,
         target: ConversationState,
     ) -> None:
-        """Trigger Google Sheets sync as a background task for terminal states."""
-        if target not in _SHEETS_SYNC_STATES:
-            return
+        """Trigger Google Sheets sync as a background task on every state change."""
 
         async def _do_sync() -> None:
             try:
