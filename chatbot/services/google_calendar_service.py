@@ -196,9 +196,23 @@ async def create_event(
     try:
         created = await _run_in_executor(_insert)
     except HttpError as exc:
-        raise GoogleCalendarError(
-            f"Failed to create event: {exc}", status_code=exc.resp.status
-        ) from exc
+        if exc.resp.status == 403 and attendee_email:
+            logger.warning(
+                "[google_calendar] 403 with attendee — retrying without attendee_email=%s",
+                attendee_email,
+            )
+            event_body.pop("attendees", None)
+            try:
+                created = await _run_in_executor(_insert)
+            except HttpError as retry_exc:
+                raise GoogleCalendarError(
+                    f"Failed to create event: {retry_exc}",
+                    status_code=retry_exc.resp.status,
+                ) from retry_exc
+        else:
+            raise GoogleCalendarError(
+                f"Failed to create event: {exc}", status_code=exc.resp.status
+            ) from exc
 
     event_id: str = created["id"]
     logger.info("[google_calendar] Created event %s for %s", event_id, demo.user_phone)
