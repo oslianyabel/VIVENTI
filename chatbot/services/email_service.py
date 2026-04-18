@@ -1,22 +1,40 @@
-"""Email service using Resend API."""
+"""Email service using SMTP (Google Workspace)."""
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
-import resend
+import aiosmtplib
 
 from chatbot.core.config import config
 
 logger = logging.getLogger(__name__)
 
-# Configure Resend
-resend.api_key = config.RESEND_API_KEY
-
 
 class EmailServiceError(Exception):
-    """Raised when the Resend API returns an error."""
+    """Raised when an email sending operation fails."""
+
+
+async def _send_email(to: str, subject: str, html_body: str) -> None:
+    """Send an email via SMTP with a 30-second timeout."""
+    msg = MIMEMultipart("alternative")
+    msg["From"] = config.SMTP_FROM
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.attach(MIMEText(html_body, "html"))
+
+    await aiosmtplib.send(
+        msg,
+        hostname=config.SMTP_HOST,
+        port=config.SMTP_PORT,
+        username=config.SMTP_USER,
+        password=config.SMTP_PASSWORD,
+        start_tls=True,
+        timeout=30,
+    )
 
 
 def _build_demo_invitation_html(
@@ -82,7 +100,7 @@ async def send_demo_invitation(
     description: str,
     calendar_link: str,
 ) -> None:
-    """Send a demo invitation email via Resend API."""
+    """Send a demo invitation email via SMTP."""
     logger.info("[email_service] Sending demo invitation to %s", to_email)
 
     formatted_date = scheduled_at.strftime("%d/%m/%Y a las %H:%M")
@@ -97,16 +115,8 @@ async def send_demo_invitation(
     )
 
     try:
-        params: resend.Emails.SendParams = {
-            "from": config.GMAIL_SENDER,
-            "to": [to_email],
-            "subject": subject,
-            "html": html_body,
-        }
-        r = resend.Emails.send(params)
-        logger.info(
-            "[email_service] Email sent successfully to %s, id: %s", to_email, r["id"]
-        )
+        await _send_email(to=to_email, subject=subject, html_body=html_body)
+        logger.info("[email_service] Email sent successfully to %s", to_email)
     except Exception as exc:
-        logger.error("[email_service] Error sending email via Resend: %s", exc)
+        logger.error("[email_service] Error sending email via SMTP: %s", exc)
         raise EmailServiceError(f"Failed to send email to {to_email}: {exc}") from exc

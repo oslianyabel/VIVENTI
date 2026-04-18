@@ -35,9 +35,12 @@ class MyConfig(BaseSettings):  # type: ignore
     GOOGLE_SHEETS_CREDENTIALS_FILE: str
     GOOGLE_SHEETS_SPREADSHEET_ID: str
 
-    # Email (Resend)
-    RESEND_API_KEY: str
-    GMAIL_SENDER: str
+    # Email (SMTP)
+    SMTP_HOST: str
+    SMTP_PORT: int
+    SMTP_USER: str
+    SMTP_PASSWORD: str
+    SMTP_FROM: str
 
     # Server
     SERVER_HOST: str
