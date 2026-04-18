@@ -36,6 +36,5 @@ docker/
 .gitignore
 
 # Scripts y contexto de desarrollo
-scripts/
 context/
 sql/

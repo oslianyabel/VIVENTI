@@ -28,7 +28,9 @@ context/
 logs/
 
 # Static
-static/
+static/documents
+static/images
+static/voice
 
 # Tests
 .test_artifacts/
