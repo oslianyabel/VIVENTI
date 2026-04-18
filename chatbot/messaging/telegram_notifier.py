@@ -82,6 +82,47 @@ async def notify_error(
         logger.warning("Could not send Telegram notification: %s", notify_exc)
 
 
+async def notify_startup() -> None:
+    """Notifica al desarrollador que el bot arrancó correctamente.
+
+    Se usa para confirmar que el CI/CD se ejecutó con éxito.
+    Silently logs and returns if the notification fails.
+    """
+    token: str = config.TELEGRAM_BOT_TOKEN_NOTIFIER
+    chat_id: str = config.TELEGRAM_DEV_CHAT_ID
+
+    if not token or not chat_id:
+        logger.warning(
+            "Telegram notifier not configured (TELEGRAM_BOT_TOKEN_NOTIFIER / TELEGRAM_DEV_CHAT_ID missing)"
+        )
+        return
+
+    text = "✅ *VIVENTI Bot arrancó correctamente*\n🚀 El CI/CD se ejecutó con éxito."
+
+    try:
+        async with httpx.AsyncClient(
+            base_url=TELEGRAM_API_BASE, timeout=_SEND_TIMEOUT
+        ) as client:
+            response = await client.post(
+                f"/bot{token}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "parse_mode": "Markdown",
+                },
+            )
+            if not response.is_success:
+                logger.warning(
+                    "Telegram startup notification failed: %s %s",
+                    response.status_code,
+                    response.text[:200],
+                )
+            else:
+                logger.info("Telegram startup notification sent to %s", chat_id)
+    except Exception as notify_exc:  # noqa: BLE001
+        logger.warning("Could not send Telegram startup notification: %s", notify_exc)
+
+
 def _build_slow_response_message(
     phone: str,
     user_message: str,

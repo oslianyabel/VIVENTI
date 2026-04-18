@@ -12,6 +12,7 @@ from chatbot.core.config import config
 from chatbot.core.logging_conf import init_logging
 from chatbot.core.sentry import init_sentry
 from chatbot.db.services import services
+from chatbot.messaging.telegram_notifier import notify_startup
 from chatbot.reminders.scheduler import start_scheduler
 from chatbot.services import conversation_state_service
 
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
     create_dirs()
     await conversation_state_service.preload_active_users()
     scheduler_task = await start_scheduler()
+    await notify_startup()
 
     yield
 
